@@ -2,11 +2,72 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
-  <title>curation</title>
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js; style-src 'self'; img-src 'self' data:; connect-src 'self' https://oxykbzqvgondqroelzxq.supabase.co; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <title>오늘의 AI 링크</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <p>준비 중</p>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="#v=today">오늘의 AI 링크</a>
+      <button id="logout" class="ghost" type="button" hidden>로그아웃</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="status-banner" class="banner warn" role="status" hidden></div>
+
+    <!-- 로그인 -->
+    <section id="login" class="panel" hidden>
+      <h1>로그인</h1>
+      <form id="login-form" novalidate>
+        <label for="email">이메일</label>
+        <input id="email" name="email" type="email" autocomplete="username" inputmode="email" required>
+        <label for="password">비밀번호</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <p id="login-error" class="error" role="alert" hidden></p>
+        <button id="login-submit" class="primary" type="submit">로그인</button>
+      </form>
+    </section>
+
+    <!-- 서버 연결 실패 -->
+    <section id="conn-fail" class="panel" hidden>
+      <h1>서버에 연결하지 못했어요</h1>
+      <p class="lead">서버 일시정지 가능성 — Supabase 대시보드에서 재개</p>
+      <p><a id="dashboard-link" class="text-link" target="_blank" rel="noopener">Supabase 대시보드 열기</a></p>
+      <p id="conn-detail" class="muted small"></p>
+      <button id="retry" class="primary" type="button">다시 시도</button>
+    </section>
+
+    <!-- 목록 -->
+    <section id="view" hidden>
+      <div class="view-head">
+        <h1 id="view-title"></h1>
+        <p id="view-sub" class="muted small"></p>
+      </div>
+      <a id="digest-link" class="digest-link" href="#v=digest" hidden>이번 주 못 본 것 보기 →</a>
+      <a id="today-link" class="digest-link" href="#v=today" hidden>← 오늘 목록으로</a>
+      <div id="closed-banner" class="banner" role="status" hidden>마감됨 — 지난 목록이라 선택할 수 없어요. 07:00에 새 목록이 올라와요.</div>
+      <p id="loading" class="muted center" hidden>불러오는 중…</p>
+      <p id="view-error" class="error" role="alert" hidden></p>
+      <div id="empty" class="empty" hidden></div>
+      <ol id="cards" class="cards"></ol>
+    </section>
+  </main>
+
+  <div id="action-bar" class="action-bar" hidden>
+    <div class="action-inner">
+      <button id="draft-btn" class="primary" type="button" disabled>선택 0개 → 초안 만들기</button>
+      <p class="muted small">초안 만들기는 다음 단계에서 열려요. 지금은 선택만 기억해요.</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
