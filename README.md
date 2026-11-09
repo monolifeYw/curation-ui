@@ -11,7 +11,10 @@ AI 링크 데일리 큐레이션의 모바일 화면(GitHub Pages 정적 파일)
 | 파일 | 역할 |
 |---|---|
 | `index.html` | 한 페이지. 로그인·연결 실패·목록 화면 |
-| `app.js` | 로그인(Supabase Auth), API 호출, 해시 라우팅(`#v=today`, `#v=digest`) |
+| `app.js` | 로그인(Supabase Auth), API 호출, 해시 라우팅(`#v=today`, `#v=digest`, `#v=drafts`) |
+| `drafts.js` | 초안·편집·게시 화면: 초안 병렬 호출 → 컨테이너 순차 → 30초 대기 1회 → 게시 순차(202면 10초 뒤 1회 재호출) |
+| `postFormat.js` | 서버 `supabase/functions/_shared/postFormat.ts`의 사본(타입만 걷어냄). 글자 수 = 코드포인트 수, 요약 첫 문장, 최종 텍스트 형식 |
+| `check-postformat.js` | 사본이 원본과 같은 결과를 내는지 공용 벡터로 확인 |
 | `style.css` | 모바일 우선 스타일, 밝은/어두운 모드 |
 | `config.js` | 공개 값만(프로젝트 주소, publishable 키, 대시보드 주소) |
 
@@ -26,6 +29,16 @@ python3 -m http.server 8765
 
 브라우저에서 `http://localhost:8765/`를 연다.
 
+## postFormat 사본 확인
+
+서버 원본이 바뀌면 `postFormat.js`에 그대로 다시 복사하고(타입 표기만 지움), 비공개 메인 저장소의 공용 벡터로 확인한다.
+
+```sh
+node check-postformat.js <메인 저장소>/tests/fixtures/postFormat-vectors.json
+```
+
+벡터의 `counts`·`limits`·`format`·`summaryLine` 전부를 돌리고 마지막 줄에 `N/N 통과`를 찍는다. 하나라도 틀리면 종료 코드 1. 2026-11-10 기준 17/17 통과(서버 `tests/postFormat.test.ts`와 같은 벡터).
+
 ## 테스트용 주소 옵션
 
 둘 다 개발 확인용이다. 운영자가 평소에 쓸 일은 없다.
@@ -35,13 +48,20 @@ python3 -m http.server 8765
   - 503 HTML 응답처럼 응답 내용별 처리는 아래 `?mock=`으로 확인한다.
   - API 호출은 로그인 세션이 있어야 나간다. 세션이 없으면 로그인 화면이 먼저 뜬다.
 - `?mock=<값>` — 로그인 없이 고정 가짜 데이터로 화면만 그린다(서버 호출 없음). 값:
-  - `1` 오늘 목록 10개 + 점검 경고 배너
+  - `1` 오늘 목록 10개 + 점검 경고 배너. 체크 → "초안 만들기" → 게시까지 가짜 서버로 돈다
+  - `progress` 새로고침 뒤 진행 상태(게시됨·테스트, 초안 있음, 게시 확인 중)
   - `closed` 마감된 목록(체크 불가)
   - `empty` 목록 없음(수집 중)
   - `sunday` 일요일 "이번 주 못 본 것" 링크 표시
   - `html503` 서버가 503 HTML을 돌려준 경우 → 연결 실패 화면
   - `statusfail` 목록은 정상, `/status`만 502 HTML → "점검 상태를 불러오지 못했어요" 배너
   - 주간 묶음은 `?mock=1#v=digest`
+- `&flow=<값>` — `?mock=`과 함께 쓰는 게시 흐름 가짜 응답. 1위 항목에만 적용된다. 가짜 데이터에서는 30초·10초 대기를 1/10로 줄인다.
+  - `ok`(기본) 모두 성공 · `202` 첫 게시 202 → 10초 뒤 재호출에서 성공 · `202x2` 재호출도 202(게시 대기로 남음)
+  - `422` 컨테이너 글자 수 초과 거부 · `409` 컨테이너·게시 마감 · `threads` 첫 컨테이너 생성 502 → 다시 게시하면 성공
+  - `uncertain` 게시 502 `failed_uncertain`("게시 확인 중", 자동 재시도 없음) → 다시 게시하면 성공
+  - `failed` 게시 502 `failed`(확정 실패, 코멘트 다시 편집 가능) → 다시 게시하면 새 컨테이너부터 다시 진행해 성공
+  - `llm` 2위 항목 초안 생성 실패(502) · `manual` 2위 항목 `manual: true`, 빈 초안(직접 작성 안내) · `409draft` 초안 전송 마감
 
 서버 API는 CORS로 `https://monolifeyw.github.io`만 허용하므로, 로컬에서 실제 API를 부르면 브라우저가 막아 연결 실패 화면이 뜬다. 실제 데이터 확인은 배포된 페이지에서 한다.
 

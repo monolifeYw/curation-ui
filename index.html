@@ -50,8 +50,9 @@
         <p id="view-sub" class="muted small"></p>
       </div>
       <a id="digest-link" class="digest-link" href="#v=digest" hidden>이번 주 못 본 것 보기 →</a>
+      <a id="drafts-link" class="digest-link" href="#v=drafts" hidden>진행 중인 초안·게시 보기 →</a>
       <a id="today-link" class="digest-link" href="#v=today" hidden>← 오늘 목록으로</a>
-      <div id="closed-banner" class="banner" role="status" hidden>마감됨 — 지난 목록이라 선택할 수 없어요. 07:00에 새 목록이 올라와요.</div>
+      <div id="closed-banner" class="banner" role="status" hidden>마감됨 — 지난 목록이라 새로 선택할 수 없어요. 이미 만든 초안은 00:30까지 게시할 수 있어요. 07:00에 새 목록이 올라와요.</div>
       <p id="loading" class="muted center" hidden>불러오는 중…</p>
       <p id="view-error" class="error" role="alert" hidden></p>
       <div id="empty" class="empty" hidden></div>
@@ -62,12 +63,23 @@
   <div id="action-bar" class="action-bar" hidden>
     <div class="action-inner">
       <button id="draft-btn" class="primary" type="button" disabled>선택 0개 → 초안 만들기</button>
-      <p class="muted small">초안 만들기는 다음 단계에서 열려요. 지금은 선택만 기억해요.</p>
+    </div>
+  </div>
+
+  <div id="publish-bar" class="action-bar" hidden>
+    <div class="action-inner">
+      <p id="publish-progress" class="progress" role="status" aria-live="polite"></p>
+      <div class="publish-row">
+        <label class="test-toggle"><input id="publish-test" type="checkbox"> 테스트 게시</label>
+        <button id="publish-btn" class="primary" type="button" disabled>게시</button>
+      </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
   <script src="config.js"></script>
+  <script src="postFormat.js"></script>
+  <script src="drafts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

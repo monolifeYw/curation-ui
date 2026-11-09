@@ -13,8 +13,10 @@
 
   // 테스트용 API 주소 바꾸기: 로컬에서만 받는다(배포 페이지에서 토큰이 다른 곳으로 새지 않게).
   const API = (isLocal && params.get("api")) || CFG.SUPABASE_URL + "/functions/v1/api";
-  // 개발용 가짜 데이터: ?mock=1|closed|empty|sunday|html503|statusfail (로그인 없이 화면만 확인)
+  // 개발용 가짜 데이터: ?mock=1|progress|closed|empty|sunday|html503|statusfail (로그인 없이 화면만 확인)
+  // 게시 흐름 가짜 응답: &flow=ok|202|202x2|422|409|409draft|uncertain|failed|threads|llm|manual (README 참고)
   const MOCK = params.get("mock");
+  const FLOW = params.get("flow") || "ok";
 
   // /status 점검 이름 → 짧은 한국어 라벨(모르는 이름은 그대로 보여준다)
   const CHECK_LABELS = {
@@ -35,18 +37,29 @@
     digestLink: $("digest-link"), todayLink: $("today-link"), closedBanner: $("closed-banner"),
     loading: $("loading"), viewError: $("view-error"), empty: $("empty"), cards: $("cards"),
     statusBanner: $("status-banner"), actionBar: $("action-bar"), draftBtn: $("draft-btn"), logout: $("logout"),
+    draftsLink: $("drafts-link"),
   };
   $("dashboard-link").href = CFG.DASHBOARD_URL;
 
   const sb = MOCK ? null : window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
 
-  // 선택 상태는 메모리에만 둔다(초안 만들기는 M3).
+  // 선택 상태는 메모리에만 둔다. 초안을 만든 뒤에는 서버 Item의 draft·post_state가 상태를 이어 준다.
   const selected = new Set();
   let selectedDate = null;
   let loadSeq = 0;
 
   class ConnError extends Error {}
   class AuthError extends Error {}
+
+  const drafts = window.CurationDrafts({
+    el: { cards: $("cards"), publishBar: $("publish-bar"), publishProgress: $("publish-progress"), publishTest: $("publish-test"), publishBtn: $("publish-btn") },
+    call: callJson,
+    header: cardHeader,
+    AuthError,
+    onAuthError: () => handleError(new AuthError("401")),
+    // 가짜 데이터에서는 30초·10초 대기를 1/10로 줄인다.
+    waitScale: MOCK ? 0.1 : 1,
+  });
 
   // ---------- 화면 전환 ----------
   function show(screen) {
@@ -70,18 +83,33 @@
   }
 
   // ---------- API ----------
-  async function api(path) {
-    if (MOCK) return parse(await mockFetch(path));
+  async function request(method, path, body) {
+    if (MOCK) return mockFetch(method, path, body);
     const { data } = await sb.auth.getSession();
     const token = data.session && data.session.access_token;
     if (!token) throw new AuthError("no session");
-    let res;
+    const headers = { Authorization: "Bearer " + token };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
     try {
-      res = await fetch(API + path, { headers: { Authorization: "Bearer " + token } });
+      return await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     } catch (e) {
       throw new ConnError("네트워크 오류");
     }
-    return parse(res);
+  }
+
+  async function api(path) {
+    return parse(await request("GET", path));
+  }
+
+  // 초안·게시용: 상태 코드별로 화면이 따로 대응하므로 5xx도 그대로 돌려준다. JSON이 아니면 status 0.
+  async function callJson(method, path, body) {
+    const res = await request(method, path, body);
+    if (res.status === 401) throw new AuthError("401");
+    try {
+      return { status: res.status, body: JSON.parse(await res.text()) };
+    } catch (e) {
+      return { status: 0, body: null };
+    }
   }
 
   async function parse(res) {
@@ -130,7 +158,7 @@
   // ---------- 라우팅 ----------
   function route() {
     const v = new URLSearchParams(location.hash.slice(1)).get("v");
-    return v === "digest" ? "digest" : "today";
+    return v === "digest" || v === "drafts" ? v : "today";
   }
 
   async function load() {
@@ -143,7 +171,9 @@
       const [data] = await Promise.all([api(v === "digest" ? "/digest" : "/today"), loadStatus()]);
       if (seq !== loadSeq) return;
       el.loading.hidden = true;
-      if (v === "digest") renderDigest(data); else renderToday(data);
+      if (v === "digest") renderDigest(data);
+      else if (v === "drafts") renderDrafts(data);
+      else renderToday(data);
     } catch (e) {
       if (seq !== loadSeq) return;
       await handleError(e);
@@ -151,10 +181,12 @@
   }
 
   function resetView(v) {
-    el.viewTitle.textContent = v === "digest" ? "이번 주 못 본 것" : "오늘의 링크";
+    el.viewTitle.textContent = { digest: "이번 주 못 본 것", drafts: "코멘트 초안", today: "오늘의 링크" }[v];
     el.viewSub.textContent = "";
     el.digestLink.hidden = true;
-    el.todayLink.hidden = v !== "digest";
+    el.draftsLink.hidden = true;
+    el.todayLink.hidden = v === "today";
+    drafts.hide();
     el.closedBanner.hidden = true;
     el.viewError.hidden = true;
     el.empty.hidden = true;
@@ -189,9 +221,11 @@
   function renderToday(d) {
     const items = Array.isArray(d.items) ? d.items : [];
     if (d.date_kst !== selectedDate) { selected.clear(); selectedDate = d.date_kst; }
+    items.forEach((it) => { if (isSent(it)) selected.delete(it.id); });
     el.viewSub.textContent = formatDate(d.date_kst);
     el.digestLink.hidden = !isSundayDigestTime();
     el.closedBanner.hidden = !d.closed;
+    el.draftsLink.hidden = !items.some(isSent);
 
     if (!items.length) {
       el.empty.textContent = emptyText(d.status, d.closed);
@@ -214,6 +248,26 @@
     return "07:00에 준비돼요.";
   }
 
+  // 이미 초안을 만들었거나 게시를 시작한 항목
+  function isSent(it) {
+    return it.draft != null || it.post_state != null;
+  }
+
+  // ---------- 초안 ----------
+  function renderDrafts(d) {
+    const items = (Array.isArray(d.items) ? d.items : [])
+      .filter((it) => isSent(it) || (!d.closed && selected.has(it.id) && d.date_kst === selectedDate))
+      .sort((a, b) => a.rank - b.rank);
+    el.viewSub.textContent = formatDate(d.date_kst);
+    el.closedBanner.hidden = !d.closed;
+    if (!items.length) {
+      el.empty.textContent = "아직 고른 항목이 없어요. 오늘 목록에서 체크한 뒤 \"초안 만들기\"를 눌러 주세요.";
+      el.empty.hidden = false;
+      return;
+    }
+    drafts.render(items);
+  }
+
   // ---------- 주간 묶음 ----------
   function renderDigest(d) {
     const items = Array.isArray(d.items) ? d.items : [];
@@ -233,7 +287,74 @@
 
     const body = document.createElement("div");
     body.className = "card-body";
+    const [meta, h] = cardHeader(it);
+    const badge = stateBadge(it);
+    if (badge) meta.append(badge);
 
+    const sum = document.createElement("p");
+    sum.className = "summary";
+    if (it.summary_ko == null || it.summary_ko === "") {
+      sum.classList.add("pending");
+      sum.textContent = "요약 준비 중";
+    } else {
+      if (it.summary_fallback) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "발췌";
+        sum.append(tag);
+      }
+      sum.append(document.createTextNode(String(it.summary_ko)));
+    }
+
+    body.append(meta, h, sum);
+    if (it.post_state === "published" && /^https:\/\//i.test(String(it.permalink || ""))) {
+      const link = document.createElement("a");
+      link.className = "text-link small";
+      link.href = it.permalink;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Threads에서 보기 →";
+      body.append(link);
+    }
+    li.append(body);
+
+    // 이미 보낸 항목은 다시 고르지 않는다(진행 상태는 배지로).
+    if (opt.selectable && !isSent(it)) {
+      const label = document.createElement("label");
+      label.className = "pick";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = selected.has(it.id);
+      cb.disabled = !!opt.disabled;
+      cb.setAttribute("aria-label", "선택: " + String(it.title || ""));
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(it.id); else selected.delete(it.id);
+        li.classList.toggle("is-picked", cb.checked);
+        updateBar();
+      });
+      li.classList.toggle("is-picked", cb.checked);
+      label.append(cb);
+      li.append(label);
+    }
+    return li;
+  }
+
+  function stateBadge(it) {
+    let text = null;
+    if (it.post_state === "published") text = it.is_test ? "게시됨 · 테스트" : "게시됨";
+    else if (it.post_state === "failed_uncertain") text = "게시 확인 중";
+    else if (it.post_state === "failed") text = "게시 실패";
+    else if (it.post_state === "container_created" || it.post_state === "pending") text = "게시 대기";
+    else if (isSent(it)) text = "초안 있음";
+    if (!text) return null;
+    const b = document.createElement("span");
+    b.className = "pill pill-" + (it.post_state || "draft");
+    b.textContent = text;
+    return b;
+  }
+
+  // 순위·출처·주제 줄과 제목 링크(목록·초안 카드가 같이 쓴다)
+  function cardHeader(it) {
     const meta = document.createElement("p");
     meta.className = "meta";
     const rank = document.createElement("span");
@@ -254,49 +375,14 @@
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     h.append(a);
-
-    const sum = document.createElement("p");
-    sum.className = "summary";
-    if (it.summary_ko == null || it.summary_ko === "") {
-      sum.classList.add("pending");
-      sum.textContent = "요약 준비 중";
-    } else {
-      if (it.summary_fallback) {
-        const tag = document.createElement("span");
-        tag.className = "tag";
-        tag.textContent = "발췌";
-        sum.append(tag);
-      }
-      sum.append(document.createTextNode(String(it.summary_ko)));
-    }
-
-    body.append(meta, h, sum);
-    li.append(body);
-
-    if (opt.selectable) {
-      const label = document.createElement("label");
-      label.className = "pick";
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = selected.has(it.id);
-      cb.disabled = !!opt.disabled;
-      cb.setAttribute("aria-label", "선택: " + String(it.title || ""));
-      cb.addEventListener("change", () => {
-        if (cb.checked) selected.add(it.id); else selected.delete(it.id);
-        li.classList.toggle("is-picked", cb.checked);
-        updateBar();
-      });
-      li.classList.toggle("is-picked", cb.checked);
-      label.append(cb);
-      li.append(label);
-    }
-    return li;
+    return [meta, h];
   }
 
   function updateBar() {
-    // M2: 서버 쪽 초안 생성(POST /drafts)이 M3이라 버튼은 항상 비활성.
     el.draftBtn.textContent = "선택 " + selected.size + "개 → 초안 만들기";
+    el.draftBtn.disabled = selected.size === 0;
   }
+  el.draftBtn.addEventListener("click", () => { if (selected.size) location.hash = "v=drafts"; });
 
   // ---------- 로그인 ----------
   el.loginForm.addEventListener("submit", async (ev) => {
@@ -334,7 +420,13 @@
   });
 
   el.retry.addEventListener("click", () => start());
-  window.addEventListener("hashchange", () => { if (el.login.hidden) load(); });
+  // 게시 중에는 화면을 옮기지 않는다(진행 상황이 사라지지 않게).
+  let lastHash = location.hash;
+  window.addEventListener("hashchange", () => {
+    if (drafts.isRunning()) { history.replaceState(null, "", lastHash || "#v=drafts"); return; }
+    lastHash = location.hash;
+    if (el.login.hidden) load();
+  });
 
   async function start() {
     if (MOCK) { load(); return; }
@@ -350,22 +442,71 @@
   }
 
   // ---------- 개발용 가짜 응답(?mock=) ----------
-  function mockFetch(path) {
+  const mockPublishTries = {};
+  const mockContainerTries = {};
+
+  async function mockFetch(method, path, body) {
     const json = (obj, status) => new Response(JSON.stringify(obj), {
       status: status || 200, headers: { "content-type": "application/json" },
     });
-    if (MOCK === "html503") {
-      return new Response("<html><body>Service Unavailable</body></html>", {
-        status: 503, headers: { "content-type": "text/html" },
-      });
-    }
-    if (path === "/status" && MOCK === "statusfail") {
-      return new Response("<html>bad gateway</html>", { status: 502, headers: { "content-type": "text/html" } });
-    }
+    const html = (status) => new Response("<html><body>error</body></html>", { status, headers: { "content-type": "text/html" } });
+    if (MOCK === "html503") return html(503);
+    if (path === "/status" && MOCK === "statusfail") return html(502);
     if (path === "/status") return json({ ok: false, failing: ["job_failed", "items_short", "new_check_x"] });
     if (path === "/digest") return json({ week: "2026-11-08", items: [] });
     if (MOCK === "empty") return json({ date_kst: "2026-11-10", status: "collecting", closed: false, items: [] });
-    return json({ date_kst: "2026-11-10", status: MOCK === "closed" ? "closed" : "ready", closed: MOCK === "closed", items: MOCK_ITEMS });
+    if (path === "/today") {
+      return json({ date_kst: "2026-11-10", status: MOCK === "closed" ? "closed" : "ready", closed: MOCK === "closed", items: MOCK_ITEMS });
+    }
+
+    const m = /^\/items\/(\d+)\/(draft|container|publish)$/.exec(path);
+    const it = m && MOCK_ITEMS.find((x) => x.id === Number(m[1]));
+    if (method !== "POST" || !it) return json({ error: "not_found" }, 404);
+    const first = it.id === 100; // flow 시나리오는 1위 항목에만 적용
+    const summaryLine = it.summary_ko ? window.PostFormat.summaryLine(it.summary_ko) : it.title;
+
+    if (m[2] === "draft") {
+      await new Promise((r) => setTimeout(r, 600));
+      if (FLOW === "409draft") return json({ error: "closed" }, 409);
+      if (FLOW === "llm" && it.id === 101) return json({ error: "llm" }, 502);
+      if (FLOW === "manual" && it.id === 101) {
+        it.draft = "";
+        return json({ item_id: it.id, draft: "", manual: true, summary_line: summaryLine, url: it.url });
+      }
+      if (it.draft == null) it.draft = "이건 꼭 볼 만해요. " + String(it.title).slice(0, 40) + " — 핵심만 짚어 봤어요.";
+      return json({ item_id: it.id, draft: it.draft, summary_line: summaryLine, url: it.url });
+    }
+    if (m[2] === "container") {
+      await new Promise((r) => setTimeout(r, 300));
+      if (FLOW === "409") return json({ error: "closed" }, 409);
+      if (it.post_state === "published") return json({ state: "published", is_test: it.is_test, permalink: it.permalink });
+      if (it.draft == null) return json({ error: "no_draft" }, 409);
+      const text = window.PostFormat.formatPost(body.comment, summaryLine, it.url);
+      const len = window.PostFormat.countChars(text);
+      if (len > 500 || (FLOW === "422" && first)) return json({ error: "too_long", length: Math.max(len, 501) }, 422);
+      mockContainerTries[it.id] = (mockContainerTries[it.id] || 0) + 1;
+      if (FLOW === "threads" && first && mockContainerTries[it.id] === 1) return json({ error: "threads" }, 502);
+      it.final = body.comment.trim();
+      it.post_state = "container_created";
+      it.is_test = !!body.test;
+      return json({ state: "container_created", is_test: it.is_test, permalink: null });
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    if (FLOW === "409") return json({ error: "closed" }, 409);
+    if (it.post_state !== "container_created" && it.post_state !== "failed_uncertain") return json({ error: "no_container" }, 409);
+    const tries = (mockPublishTries[it.id] = (mockPublishTries[it.id] || 0) + 1);
+    if (first && (FLOW === "202x2" || (FLOW === "202" && tries === 1))) return json({ state: "container_created" }, 202);
+    if (first && FLOW === "uncertain" && tries === 1) {
+      it.post_state = "failed_uncertain";
+      return json({ state: "failed_uncertain" }, 502);
+    }
+    if (first && FLOW === "failed" && tries === 1) {
+      it.post_state = "failed";
+      return json({ state: "failed" }, 502);
+    }
+    it.post_state = "published";
+    it.permalink = "https://www.threads.net/@example/post/M" + it.id;
+    return json({ state: "published", permalink: it.permalink });
   }
 
   const MOCK_ITEMS = [
@@ -379,7 +520,15 @@
     ["인공지능신문: 국내 기업의 사내 코딩 도우미 도입 현황", "인공지능신문", "AI 코딩 도구", "설문에 응한 기업 절반이 시범 도입 단계이며, 보안 검토가 가장 큰 걸림돌로 꼽혔다.", false],
     ["OpenAI 블로그: 응답 API의 새 추론 설정 안내", "OpenAI", "LLM 신모델", "추론 강도 설정별 지연과 비용 차이를 표로 보여주고 권장 기본값을 제시했다.", false],
     ["HF Daily Papers: 작은 모델로 큰 모델 검증하기", "HF Daily Papers", "에이전트", "작은 검증 모델이 큰 모델의 답을 거르는 방식으로 정확도를 높인 실험을 소개한다.", false],
-  ].map((r, i) => ({ id: 100 + i, rank: i + 1, title: r[0], url: "https://example.com/item/" + (i + 1), source_name: r[1], topic: r[2], summary_ko: r[3], summary_fallback: r[4] }));
+  ].map((r, i) => ({ id: 100 + i, rank: i + 1, title: r[0], url: "https://example.com/item/" + (i + 1), source_name: r[1], topic: r[2], summary_ko: r[3], summary_fallback: r[4],
+    draft: null, final: null, post_state: null, is_test: null, permalink: null }));
+
+  // ?mock=progress: 새로고침 뒤 진행 상태 표시 확인용(게시됨·초안 있음·불확실)
+  if (MOCK === "progress") {
+    Object.assign(MOCK_ITEMS[0], { draft: "먼저 올린 코멘트", final: "먼저 올린 코멘트", post_state: "published", is_test: true, permalink: "https://www.threads.net/@example/post/M100" });
+    Object.assign(MOCK_ITEMS[1], { draft: "초안만 만든 코멘트" });
+    Object.assign(MOCK_ITEMS[2], { draft: "결과가 불확실한 코멘트", final: "결과가 불확실한 코멘트", post_state: "failed_uncertain", is_test: false });
+  }
 
   start();
 })();
