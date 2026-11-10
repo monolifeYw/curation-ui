@@ -154,6 +154,8 @@ input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid 
 /* ---------- 초안 카드 ---------- */
 .draft-card .card-body { padding-right: 16px; }
 .draft-card.is-done { border-color: var(--accent); }
+.draft-card.is-skipped textarea, .draft-card.is-skipped .preview, .draft-card.is-skipped .counter { opacity: 0.45; }
+.skip-toggle { margin-top: 6px; color: var(--muted); }
 .draft-state { margin: 6px 0; font-size: 14px; color: var(--muted); }
 textarea {
   display: block; width: 100%; margin-top: 8px; resize: vertical;

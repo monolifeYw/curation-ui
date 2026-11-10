@@ -118,7 +118,16 @@ window.CurationDrafts = function (ctx) {
     e.link.rel = "noopener noreferrer";
     e.link.textContent = "Threads에서 보기 →";
 
-    body.append(e.stateLine, e.textarea, e.counter, e.previewLabel, e.preview, e.retryBtn, e.link);
+    // 확인한 것만 게시: 체크하면 이번 게시에서 뺀다(00:30 게시 마감 전까지 다시 넣을 수 있음)
+    e.skip = false;
+    e.skipBox = document.createElement("input");
+    e.skipBox.type = "checkbox";
+    e.skipBox.addEventListener("change", () => { e.skip = e.skipBox.checked; refresh(e); updateBar(); });
+    e.skipToggle = document.createElement("label");
+    e.skipToggle.className = "test-toggle skip-toggle";
+    e.skipToggle.append(e.skipBox, document.createTextNode(" 이 항목은 게시 안 함"));
+
+    body.append(e.stateLine, e.textarea, e.counter, e.previewLabel, e.preview, e.retryBtn, e.skipToggle, e.link);
     li.append(body);
     e.node = li;
     refresh(e);
@@ -178,6 +187,12 @@ window.CurationDrafts = function (ctx) {
     e.retryBtn.hidden = e.phase !== "error";
     e.retryBtn.disabled = running;
 
+    // 결과 불확실(uncertain)은 이미 올라갔을 수 있어 빼지 않는다.
+    e.skipToggle.hidden = !(e.phase === "ready" || e.phase === "container");
+    e.skipBox.disabled = running;
+    e.skipBox.checked = e.skip;
+    e.node.classList.toggle("is-skipped", e.skip && !e.skipToggle.hidden);
+
     const safe = /^https:\/\//i.test(String(e.permalink || ""));
     e.link.hidden = !(e.phase === "published" && safe);
     if (safe) e.link.href = e.permalink;
@@ -212,7 +227,10 @@ window.CurationDrafts = function (ctx) {
 
   // ---------- 게시 버튼 ----------
   function targets() {
-    return entries.filter((e) => e.phase === "ready" || e.phase === "container" || e.phase === "uncertain");
+    return entries.filter((e) =>
+      (e.phase === "ready" || e.phase === "container" || e.phase === "uncertain") &&
+      !(e.skip && e.phase !== "uncertain")
+    );
   }
 
   function updateBar() {
@@ -245,13 +263,14 @@ window.CurationDrafts = function (ctx) {
       if (created) {
         await countdown(CONTAINER_WAIT, (s) => progress("Threads가 글을 처리하는 중 — " + s + "초 뒤 게시해요"));
       }
-      const pub = entries.filter((e) => e.phase === "container" || e.phase === "uncertain");
+      const pub = targets().filter((e) => e.phase === "container" || e.phase === "uncertain");
       for (let i = 0; i < pub.length; i++) {
         progress("게시 중 " + (i + 1) + "/" + pub.length);
         await publishOne(pub[i]);
       }
       const done = entries.filter((e) => e.phase === "published").length;
-      const rest = entries.length - done;
+      const skipped = entries.filter((e) => e.skip && (e.phase === "ready" || e.phase === "container")).length;
+      const rest = entries.length - done - skipped;
       progress(done + "개 게시됨" + (rest ? " · " + rest + "개는 카드의 안내를 확인해 주세요." : " · 모두 끝났어요."));
     } catch (e) {
       if (!(e instanceof ctx.AuthError)) throw e;
