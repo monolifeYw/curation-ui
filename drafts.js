@@ -69,11 +69,12 @@ window.CurationDrafts = function (ctx) {
   }
 
   function makeEntry(it) {
-    // 새로고침 뒤 미리보기: 서버와 같은 규칙(summary_ko 첫 문장, 없으면 제목)
+    // 새로고침 뒤 미리보기: 서버와 같은 규칙(summary_ko 첫 문장, 없으면 제목. 목록형은 요약 한 줄 없음)
     const e = {
       // final = 서버에 확정된 코멘트(컨테이너 생성 때 저장). 게시 텍스트는 formatPost로 조립한다.
-      it, comment: it.final ?? it.draft ?? "", url: it.url, final: it.final ?? null,
-      summaryLine: (it.summary_ko ? PF.summaryLine(it.summary_ko) : "") || String(it.title || ""),
+      it, comment: it.final ?? it.draft ?? "", url: it.url, final: it.final ?? null, format: it.format || "comment",
+      summaryLine: it.format === "list" ? ""
+        : (it.summary_ko ? PF.summaryLine(it.summary_ko) : "") || String(it.title || ""),
       isTest: it.is_test, permalink: it.permalink || null, msg: "", phase: it.draft != null ? "ready" : "drafting",
     };
     // pending·failed는 다음 container 호출이 이어받으므로 편집 가능(ready)으로 둔다.
@@ -93,7 +94,7 @@ window.CurationDrafts = function (ctx) {
     e.stateLine.className = "draft-state";
 
     e.textarea = document.createElement("textarea");
-    e.textarea.rows = 4;
+    e.textarea.rows = e.format === "list" ? 9 : 4;
     e.textarea.setAttribute("aria-label", "코멘트: " + String(it.title || ""));
     e.textarea.addEventListener("input", () => { e.comment = e.textarea.value; refresh(e); updateBar(); });
 
@@ -180,6 +181,7 @@ window.CurationDrafts = function (ctx) {
       + (n > PF.MAX_CHARS ? " — 500자를 넘으면 게시할 수 없어요" : empty ? " — 코멘트가 비어 있어요" : "");
     e.counter.classList.toggle("over", n > PF.MAX_CHARS || empty);
 
+    e.previewLabel.textContent = e.format === "list" ? "게시될 글 · 목록형" : "게시될 글";
     e.previewLabel.hidden = !hasText || !text;
     e.preview.hidden = !hasText || !text;
     e.preview.textContent = text;
@@ -209,6 +211,8 @@ window.CurationDrafts = function (ctx) {
     if (r.status === 200 && r.body) {
       e.comment = String(r.body.draft || "");
       e.summaryLine = String(r.body.summary_line || "");
+      e.format = r.body.format === "list" ? "list" : "comment";
+      e.textarea.rows = e.format === "list" ? 9 : 4;
       e.url = String(r.body.url || e.it.url);
       e.phase = "ready";
       if (r.body.manual) e.msg = MSG.manual;

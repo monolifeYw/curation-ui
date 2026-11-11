@@ -32,9 +32,9 @@
     return sentences(summary)[0] ?? "";
   }
 
-  /** 최종 게시 텍스트: 코멘트 → 빈 줄 → 요약 한 줄 → 링크. */
+  /** 최종 게시 텍스트: 코멘트 → 빈 줄 → 요약 한 줄 → 링크. 요약 한 줄이 비면(목록형) 코멘트 → 빈 줄 → 링크. */
   function formatPost(comment, line, url) {
-    return `${comment.trim()}\n\n${line}\n${url}`;
+    return line ? `${comment.trim()}\n\n${line}\n${url}` : `${comment.trim()}\n\n${url}`;
   }
 
   const api = { MAX_CHARS, countChars, sentences, summaryLine, formatPost };
